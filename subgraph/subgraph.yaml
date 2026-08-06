@@ -1,0 +1,61 @@
+specVersion: 1.2.0
+schema:
+  file: ./schema.graphql
+indexerHints:
+  prune: auto
+
+dataSources:
+  # ── 工厂合约 ──
+  - kind: ethereum
+    name: DefiFactory
+    network: sepolia
+    source:
+      address: "0x"  # 替换为部署后的 Factory 地址
+      abi: DefiFactory
+      startBlock: 0   # 替换为部署区块号
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Pair
+        - Factory
+      abis:
+        - name: DefiFactory
+          file: ./abis/DefiFactory.json
+        - name: DefiPair
+          file: ./abis/DefiPair.json
+      eventHandlers:
+        - event: PairCreated(indexed address,indexed address,address,uint256)
+          handler: handlePairCreated
+      file: ./src/mapping.ts
+
+templates:
+  # ── 动态创建的交易对合约 ──
+  - kind: ethereum
+    name: DefiPair
+    network: sepolia
+    source:
+      abi: DefiPair
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Pair
+        - Swap
+        - LiquidityAction
+        - UserStats
+      abis:
+        - name: DefiPair
+          file: ./abis/DefiPair.json
+      eventHandlers:
+        - event: Swap(indexed address,uint256,uint256,uint256,uint256,indexed address)
+          handler: handleSwap
+        - event: Mint(indexed address,uint256,uint256)
+          handler: handleMint
+        - event: Burn(indexed address,uint256,uint256,indexed address)
+          handler: handleBurn
+        - event: Sync(uint112,uint112)
+          handler: handleSync
+      file: ./src/mapping.ts

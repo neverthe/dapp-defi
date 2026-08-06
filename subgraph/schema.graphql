@@ -1,0 +1,89 @@
+# ── 工厂实体 ──
+type Factory @entity {
+  id: ID!                          # "factory"
+  pairCount: Int!
+  totalVolumeUSD: BigDecimal!
+  totalLiquidityUSD: BigDecimal!
+}
+
+# ── 交易对实体 ──
+type Pair @entity {
+  id: ID!                          # pair address
+  token0: Token!
+  token1: Token!
+  reserve0: BigDecimal!
+  reserve1: BigDecimal!
+  totalSupply: BigDecimal!         # LP Token 总供应量
+  # 交易量统计
+  volumeToken0: BigDecimal!
+  volumeToken1: BigDecimal!
+  volumeUSD: BigDecimal!
+  # 手续费统计
+  feesToken0: BigDecimal!
+  feesToken1: BigDecimal!
+  # 交易次数
+  txCount: Int!
+  # 创建信息
+  createdAtTimestamp: BigInt!
+  createdAtBlockNumber: BigInt!
+  # 衍生数据
+  swaps: [Swap!]! @derivedFrom(field: "pair")
+  liquidityActions: [LiquidityAction!]! @derivedFrom(field: "pair")
+}
+
+# ── 代币实体 ──
+type Token @entity {
+  id: ID!                          # token address
+  symbol: String!
+  name: String!
+  decimals: Int!
+  # 所有包含该代币的交易对
+  pairs: [Pair!]! @derivedFrom(field: "token0")
+  pairs1: [Pair!]! @derivedFrom(field: "token1")
+}
+
+# ── Swap 事件 ──
+type Swap @entity(immutable: true) {
+  id: ID!                          # tx hash + log index
+  pair: Pair!
+  sender: Bytes!
+  from: Bytes!                     # 交易发起者
+  amount0In: BigDecimal!
+  amount1In: BigDecimal!
+  amount0Out: BigDecimal!
+  amount1Out: BigDecimal!
+  to: Bytes!
+  timestamp: BigInt!
+  txHash: Bytes!
+}
+
+# ── 流动性操作事件 ──
+type LiquidityAction @entity(immutable: true) {
+  id: ID!                          # tx hash + log index
+  pair: Pair!
+  type: LiquidityType!             # Mint(添加) 或 Burn(移除)
+  sender: Bytes!
+  amount0: BigDecimal!
+  amount1: BigDecimal!
+  liquidity: BigDecimal!           # LP Token 变化量
+  timestamp: BigInt!
+  txHash: Bytes!
+}
+
+# ── 用户统计 ──
+type UserStats @entity {
+  id: ID!                          # user address
+  swapCount: Int!
+  totalVolumeUSD: BigDecimal!
+  # 该用户的所有流动性操作
+  liquidityActions: [LiquidityAction!]! @derivedFrom(field: "user")
+  # 手续费收入（通过子图累加计算）
+  totalFeesEarnedToken0: BigDecimal!
+  totalFeesEarnedToken1: BigDecimal!
+}
+
+# ── 枚举 ──
+enum LiquidityType {
+  Mint
+  Burn
+}

@@ -1,0 +1,3 @@
+# ABI 文件目录
+合约编译后，运行以下命令将 ABI 复制到此处：
+`copy artifacts\contracts\*.sol\*.json src\abis\`
