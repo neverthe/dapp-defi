@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAccount, useWriteContract, useReadContract, useSimulateContract } from 'wagmi'
+import { useAccount, useWriteContract, useReadContract } from 'wagmi'
 import { parseEther, formatEther, maxUint256 } from 'viem'
 import { sepolia } from 'wagmi/chains'
 import RouterAbi from '@/abis/DefiRouter.json'
@@ -61,8 +61,12 @@ export default function PoolPage() {
 
   const reservesData = reserves as [bigint, bigint, number] | undefined
   const totalSupplyData = totalSupply as bigint | undefined
-
   const userLpBalance = lpBalance as bigint | undefined
+
+  // 提取原始值避免数组引用导致无限重算
+  const reserve0 = reservesData?.[0]
+  const reserve1 = reservesData?.[1]
+
   const poolShare = userLpBalance && totalSupplyData
     ? getPoolShare(userLpBalance, totalSupplyData)
     : 0
@@ -72,9 +76,8 @@ export default function PoolPage() {
   const [estimatedShare, setEstimatedShare] = useState(0)
 
   useEffect(() => {
-    if (!reservesData || !amountA || !amountB || !totalSupplyData) return
+    if (!reserve0 || !reserve1 || !amountA || !amountB || !totalSupplyData) return
     try {
-      const [reserve0, reserve1] = reservesData
       const lp = getLiquidityAmount(
         parseEther(amountA),
         parseEther(amountB),
@@ -89,15 +92,14 @@ export default function PoolPage() {
       setEstimatedLp('')
       setEstimatedShare(0)
     }
-  }, [amountA, amountB, reservesData, totalSupplyData])
+  }, [amountA, amountB, reserve0, reserve1, totalSupplyData])
 
   // 计算移除将获得的代币
   const [removeAmounts, setRemoveAmounts] = useState<{ amount0: string; amount1: string }>({ amount0: '', amount1: '' })
 
   useEffect(() => {
-    if (!reservesData || !removeLp || !totalSupplyData || !totalSupplyData) return
+    if (!reserve0 || !reserve1 || !removeLp || !totalSupplyData) return
     try {
-      const [reserve0, reserve1] = reservesData
       const amounts = getRemoveAmounts(
         parseEther(removeLp),
         reserve0,
@@ -111,55 +113,47 @@ export default function PoolPage() {
     } catch {
       setRemoveAmounts({ amount0: '', amount1: '' })
     }
-  }, [removeLp, reservesData, totalSupplyData])
+  }, [removeLp, reserve0, reserve1, totalSupplyData])
 
-  // 授权
+  // 直接发交易，不用 useSimulateContract（避免 RPC 轮询导致 OOM）
   const { writeContract: approve } = useWriteContract()
-  const { writeContract } = useWriteContract()
-
-  // 添加流动性预判
-  const { data: addSimulate } = useSimulateContract({
-    address: ROUTER_ADDRESS as `0x${string}`,
-    abi: RouterAbi.abi,
-    functionName: 'addLiquidity',
-    args: amountA && amountB ? [
-      TOKEN_A_ADDRESS as `0x${string}`,
-      TOKEN_B_ADDRESS as `0x${string}`,
-      parseEther(amountA),
-      parseEther(amountB),
-      0n, 0n,
-      address as `0x${string}`,
-      BigInt(Math.floor(Date.now() / 1000) + 1200),
-    ] : undefined,
-    chainId: sepolia.id,
-    query: { enabled: !!amountA && !!amountB && !!address },
-  })
-
-  // 移除流动性预判
-  const { data: removeSimulate } = useSimulateContract({
-    address: ROUTER_ADDRESS as `0x${string}`,
-    abi: RouterAbi.abi,
-    functionName: 'removeLiquidity',
-    args: removeLp ? [
-      TOKEN_A_ADDRESS as `0x${string}`,
-      TOKEN_B_ADDRESS as `0x${string}`,
-      parseEther(removeLp),
-      0n, 0n,
-      address as `0x${string}`,
-      BigInt(Math.floor(Date.now() / 1000) + 1200),
-    ] : undefined,
-    chainId: sepolia.id,
-    query: { enabled: !!removeLp && !!address && pairExists },
-  })
+  const { writeContract, isPending } = useWriteContract()
 
   const handleAddLiquidity = () => {
-    if (!addSimulate?.request) return
-    writeContract(addSimulate.request as any)
+    if (!amountA || !amountB || !address) return
+    writeContract({
+      address: ROUTER_ADDRESS as `0x${string}`,
+      abi: RouterAbi.abi,
+      functionName: 'addLiquidity',
+      args: [
+        TOKEN_A_ADDRESS as `0x${string}`,
+        TOKEN_B_ADDRESS as `0x${string}`,
+        parseEther(amountA),
+        parseEther(amountB),
+        0n, 0n,
+        address as `0x${string}`,
+        BigInt(Math.floor(Date.now() / 1000) + 1200),
+      ],
+      chainId: sepolia.id,
+    })
   }
 
   const handleRemoveLiquidity = () => {
-    if (!removeSimulate?.request) return
-    writeContract(removeSimulate.request as any)
+    if (!removeLp || !address) return
+    writeContract({
+      address: ROUTER_ADDRESS as `0x${string}`,
+      abi: RouterAbi.abi,
+      functionName: 'removeLiquidity',
+      args: [
+        TOKEN_A_ADDRESS as `0x${string}`,
+        TOKEN_B_ADDRESS as `0x${string}`,
+        parseEther(removeLp),
+        0n, 0n,
+        address as `0x${string}`,
+        BigInt(Math.floor(Date.now() / 1000) + 1200),
+      ],
+      chainId: sepolia.id,
+    })
   }
 
   const handleApproveA = () => {
@@ -300,14 +294,14 @@ export default function PoolPage() {
 
             <button
               onClick={handleAddLiquidity}
-              disabled={!amountA || !amountB}
+              disabled={!amountA || !amountB || isPending}
               className={`w-full py-3 rounded-lg font-medium transition-colors ${
-                !amountA || !amountB
+                !amountA || !amountB || isPending
                   ? 'bg-gray-400 text-white cursor-not-allowed'
                   : 'bg-indigo-600 text-white hover:bg-indigo-700'
               }`}
             >
-              添加流动性
+              {isPending ? '交易中...' : '添加流动性'}
             </button>
           </div>
         ) : (
@@ -369,14 +363,14 @@ export default function PoolPage() {
 
             <button
               onClick={handleRemoveLiquidity}
-              disabled={!removeLp || !pairExists}
+              disabled={!removeLp || !pairExists || isPending}
               className={`w-full py-3 rounded-lg font-medium transition-colors ${
-                !removeLp || !pairExists
+                !removeLp || !pairExists || isPending
                   ? 'bg-gray-400 text-white cursor-not-allowed'
                   : 'bg-red-600 text-white hover:bg-red-700'
               }`}
             >
-              移除流动性
+              {isPending ? '交易中...' : '移除流动性'}
             </button>
           </div>
         )}

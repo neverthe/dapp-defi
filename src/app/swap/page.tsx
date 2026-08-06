@@ -1,14 +1,14 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useAccount, useWriteContract, useReadContract, useSimulateContract } from 'wagmi'
+import { useAccount, useWriteContract, useReadContract } from 'wagmi'
 import { parseEther, formatEther, maxUint256 } from 'viem'
 import { sepolia } from 'wagmi/chains'
 import RouterAbi from '@/abis/DefiRouter.json'
 import DefiPairAbi from '@/abis/DefiPair.json'
 import ERC20Abi from '@/abis/TestToken.json'
 import { ROUTER_ADDRESS, TOKEN_A_ADDRESS, TOKEN_B_ADDRESS, FACTORY_ADDRESS } from '@/lib/wagmi'
-import { getAmountOut, getPrice, getPriceImpact, getMinAmountOut, formatAmount } from '@/lib/utils'
+import { getAmountOut, getPrice, getPriceImpact, getMinAmountOut } from '@/lib/utils'
 import PriceChart from '@/components/PriceChart'
 
 // 默认滑点 0.5%
@@ -28,7 +28,6 @@ export default function SwapPage() {
   const [minAmountOut, setMinAmountOut] = useState('')
   const [priceImpact, setPriceImpact] = useState(0)
   const [price, setPrice] = useState(0)
-  const [loading, setLoading] = useState(false)
 
   // 读取储备量
   const { data: pairAddress } = useReadContract({
@@ -39,20 +38,33 @@ export default function SwapPage() {
     chainId: sepolia.id,
   })
 
+  const pairExists = !!pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000'
+
   const { data: reserves } = useReadContract({
     address: pairAddress as `0x${string}` | undefined,
     abi: DefiPairAbi.abi,
     functionName: 'getReserves',
     chainId: sepolia.id,
-    query: { enabled: !!pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000' },
+    query: { enabled: pairExists },
   })
 
   const reservesData = reserves as [bigint, bigint, number] | undefined
-  const pairExists = !!pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000'
 
-  // 计算输出
+  // 提取储备量的原始值用于 useEffect 依赖，避免数组引用变化导致无限循环
+  const reserve0 = reservesData?.[0]
+  const reserve1 = reservesData?.[1]
+
+  // 计算输出（只在 reserve0/reserve1/amountIn 等原始值变化时重算）
   useEffect(() => {
-    if (!reservesData || !amountIn || !pairExists) {
+    if (!reserve0 || !reserve1 || !amountIn || !pairExists) {
+      setAmountOut('')
+      setMinAmountOut('')
+      setPriceImpact(0)
+      return
+    }
+
+    // 储备量为 0 时不计算
+    if (reserve0 === 0n || reserve1 === 0n) {
       setAmountOut('')
       setMinAmountOut('')
       setPriceImpact(0)
@@ -60,7 +72,6 @@ export default function SwapPage() {
     }
 
     try {
-      const [reserve0, reserve1] = reservesData
       const isToken0In = tokenIn.toLowerCase() === TOKEN_A_ADDRESS.toLowerCase()
       const reserveIn = isToken0In ? reserve0 : reserve1
       const reserveOut = isToken0In ? reserve1 : reserve0
@@ -78,7 +89,7 @@ export default function SwapPage() {
     } catch {
       // 输入格式错误
     }
-  }, [amountIn, reservesData, tokenIn, slippage, pairExists])
+  }, [amountIn, reserve0, reserve1, tokenIn, slippage, pairExists])
 
   // 交换代币
   const handleSwapTokens = useCallback(() => {
@@ -88,27 +99,24 @@ export default function SwapPage() {
     setAmountOut('')
   }, [tokenIn, tokenOut])
 
-  // 预判交易（useSimulateContract 预判失败）
-  const { data: simulateData, error: simulateError } = useSimulateContract({
-    address: ROUTER_ADDRESS as `0x${string}`,
-    abi: RouterAbi.abi,
-    functionName: 'swapExactTokensForTokens',
-    args: amountIn && minAmountOut ? [
-      parseEther(amountIn),
-      parseEther(minAmountOut),
-      [tokenIn as `0x${string}`, tokenOut as `0x${string}`],
-      address as `0x${string}`,
-      BigInt(Math.floor(Date.now() / 1000) + 1200),
-    ] : undefined,
-    chainId: sepolia.id,
-    query: { enabled: !!amountIn && !!minAmountOut && !!address && pairExists },
-  })
-
+  // 直接发交易，不用 useSimulateContract（避免 RPC 轮询导致 OOM）
   const { writeContract, isPending } = useWriteContract()
 
   const handleSwap = () => {
-    if (!simulateData?.request) return
-    writeContract(simulateData.request as any)
+    if (!amountIn || !minAmountOut || !address) return
+    writeContract({
+      address: ROUTER_ADDRESS as `0x${string}`,
+      abi: RouterAbi.abi,
+      functionName: 'swapExactTokensForTokens',
+      args: [
+        parseEther(amountIn),
+        parseEther(minAmountOut),
+        [tokenIn as `0x${string}`, tokenOut as `0x${string}`],
+        address as `0x${string}`,
+        BigInt(Math.floor(Date.now() / 1000) + 1200),
+      ],
+      chainId: sepolia.id,
+    })
   }
 
   // 读取代币余额和授权
@@ -143,6 +151,9 @@ export default function SwapPage() {
       chainId: sepolia.id,
     })
   }
+
+  // 池子是否有流动性
+  const hasLiquidity = !!reserve0 && !!reserve1 && reserve0 > 0n && reserve1 > 0n
 
   if (!isConnected) {
     return (
@@ -268,6 +279,10 @@ export default function SwapPage() {
           <div className="p-3 text-center text-sm text-yellow-600 bg-yellow-50 rounded-lg">
             交易对不存在，请先在"流动性"页面创建
           </div>
+        ) : !hasLiquidity ? (
+          <div className="p-3 text-center text-sm text-yellow-600 bg-yellow-50 rounded-lg">
+            池子暂无流动性，请先在"流动性"页面添加
+          </div>
         ) : needsApproval ? (
           <button
             onClick={handleApprove}
@@ -278,20 +293,20 @@ export default function SwapPage() {
         ) : (
           <button
             onClick={handleSwap}
-            disabled={!amountIn || !amountOut || isPending || !!simulateError}
+            disabled={!amountIn || !amountOut || isPending}
             className={`w-full py-3 rounded-lg font-medium transition-colors ${
-              !amountIn || !amountOut || isPending || !!simulateError
+              !amountIn || !amountOut || isPending
                 ? 'bg-gray-400 text-white cursor-not-allowed'
                 : 'bg-indigo-600 text-white hover:bg-indigo-700'
             }`}
           >
-            {isPending ? '交易中...' : simulateError ? `交易失败: ${(simulateError as any)?.shortMessage || '未知错误'}` : '兑换'}
+            {isPending ? '交易中...' : '兑换'}
           </button>
         )}
       </div>
 
       {/* 价格曲线图 */}
-      {pairExists && reservesData && (
+      {pairExists && reservesData && hasLiquidity && (
         <div className="mt-6">
           <PriceChart
             reserve0={reservesData[0]}
