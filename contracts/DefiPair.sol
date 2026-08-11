@@ -127,12 +127,17 @@ contract DefiPair is ERC20, ReentrancyGuard {
         uint256 _totalSupply = totalSupply();
 
         if (_totalSupply == 0) {
-            // 首次添加流动性：sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY
+            // 首次添加流动性决定初始价格：sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY
             liquidity = _sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY;
             // 永久锁定最小流动性，防止粉尘攻击
             // OZ 5.x 不允许 _mint 到 address(0)，改用死地址锁定
+            // 永久锁定 1000 个最小单位的 LP Token 到零地址。
+            // 防止有人首次添加极少量（如 1 wei + 1 wei），让 _totalSupply 极小，后续攻击者用极低成本操纵价格。
+            // 锁仓 1000 相当于设置了一个“最低股份”，让攻击成本增加 1000 倍。
+            // 1000 个 LP Token 对应的那部分代币（约 1000 / totalSupply 的比例）永远躺在池子里，相当于所有 LP 共同“供养”了这部分流动性。
             _mint(address(0xdead), MINIMUM_LIQUIDITY);
         } else {
+            // 新增的份额，必须与池子现有的比例一致。
             // 按比例铸造：min(amount0 * totalSupply / reserve0, amount1 * totalSupply / reserve1)
             liquidity = _min(
                 amount0 * _totalSupply / _reserve0,
@@ -141,6 +146,7 @@ contract DefiPair is ERC20, ReentrancyGuard {
         }
 
         require(liquidity > 0, "DefiPair: INSUFFICIENT_LIQUIDITY_MINTED");
+        // 把新铸造的 LP Token 打给用户（to 地址）。
         _mint(to, liquidity);
 
         _update(balance0, balance1, _reserve0, _reserve1);
