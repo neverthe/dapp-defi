@@ -8,7 +8,7 @@ import RouterAbi from '@/abis/DefiRouter.json'
 import DefiPairAbi from '@/abis/DefiPair.json'
 import ERC20Abi from '@/abis/TestToken.json'
 import { ROUTER_ADDRESS, TOKEN_A_ADDRESS, TOKEN_B_ADDRESS, FACTORY_ADDRESS } from '@/lib/wagmi'
-import { getAmountOut, getPrice, getPriceImpact, getMinAmountOut } from '@/lib/utils'
+import { getAmountOut, getAmountIn, getPrice, getPriceImpact, getMinAmountOut } from '@/lib/utils'
 import PriceChart from '@/components/PriceChart'
 
 // 默认滑点 0.5%
@@ -21,10 +21,12 @@ export default function SwapPage() {
   const [tokenIn, setTokenIn] = useState(TOKEN_A_ADDRESS)
   const [tokenOut, setTokenOut] = useState(TOKEN_B_ADDRESS)
   const [amountIn, setAmountIn] = useState('')
-  const [slippage, setSlippage] = useState(DEFAULT_SLIPPAGE)
-
-  // 计算出的输出
   const [amountOut, setAmountOut] = useState('')
+  const [slippage, setSlippage] = useState(DEFAULT_SLIPPAGE)
+  // 跟踪最后编辑的是输入还是输出，实现双向输入
+  const [lastEdited, setLastEdited] = useState<'in' | 'out'>('in')
+
+  // 计算结果
   const [minAmountOut, setMinAmountOut] = useState('')
   const [priceImpact, setPriceImpact] = useState(0)
   const [price, setPrice] = useState(0)
@@ -54,16 +56,16 @@ export default function SwapPage() {
   const reserve0 = reservesData?.[0]
   const reserve1 = reservesData?.[1]
 
-  // 计算输出（只在 reserve0/reserve1/amountIn 等原始值变化时重算）
+  // 双向计算：根据 lastEdited 方向计算另一端的值
   useEffect(() => {
-    if (!reserve0 || !reserve1 || !amountIn || !pairExists) {
+    if (!reserve0 || !reserve1 || !pairExists) {
+      setAmountIn('')
       setAmountOut('')
       setMinAmountOut('')
       setPriceImpact(0)
       return
     }
 
-    // 储备量为 0 时不计算
     if (reserve0 === 0n || reserve1 === 0n) {
       setAmountOut('')
       setMinAmountOut('')
@@ -76,20 +78,38 @@ export default function SwapPage() {
       const reserveIn = isToken0In ? reserve0 : reserve1
       const reserveOut = isToken0In ? reserve1 : reserve0
 
-      const amountInWei = parseEther(amountIn)
-      const out = getAmountOut(amountInWei, reserveIn, reserveOut)
-      const minOut = getMinAmountOut(out, slippage)
-      const impact = getPriceImpact(amountInWei, reserveIn)
-      const currentPrice = getPrice(reserve0, reserve1)
-
-      setAmountOut(formatEther(out))
-      setMinAmountOut(formatEther(minOut))
-      setPriceImpact(impact)
-      setPrice(isToken0In ? currentPrice : 1 / currentPrice)
+      if (lastEdited === 'in' && amountIn) {
+        // 用户编辑输入 → 计算输出
+        const amountInWei = parseEther(amountIn)
+        const out = getAmountOut(amountInWei, reserveIn, reserveOut)
+        const minOut = getMinAmountOut(out, slippage)
+        const impact = getPriceImpact(amountInWei, reserveIn)
+        const currentPrice = getPrice(reserve0, reserve1)
+        setAmountOut(formatEther(out))
+        setMinAmountOut(formatEther(minOut))
+        setPriceImpact(impact)
+        setPrice(isToken0In ? currentPrice : 1 / currentPrice)
+      } else if (lastEdited === 'out' && amountOut) {
+        // 用户编辑输出 → 计算所需输入
+        const amountOutWei = parseEther(amountOut)
+        const inAmount = getAmountIn(amountOutWei, reserveIn, reserveOut)
+        const minOut = getMinAmountOut(amountOutWei, slippage)
+        const impact = getPriceImpact(inAmount, reserveIn)
+        const currentPrice = getPrice(reserve0, reserve1)
+        setAmountIn(formatEther(inAmount))
+        setMinAmountOut(formatEther(minOut))
+        setPriceImpact(impact)
+        setPrice(isToken0In ? currentPrice : 1 / currentPrice)
+      } else {
+        setAmountIn('')
+        setAmountOut('')
+        setMinAmountOut('')
+        setPriceImpact(0)
+      }
     } catch {
       // 输入格式错误
     }
-  }, [amountIn, reserve0, reserve1, tokenIn, slippage, pairExists])
+  }, [amountIn, amountOut, reserve0, reserve1, tokenIn, slippage, pairExists, lastEdited])
 
   // 交换代币
   const handleSwapTokens = useCallback(() => {
@@ -177,7 +197,7 @@ export default function SwapPage() {
               type="number"
               placeholder="0.0"
               value={amountIn}
-              onChange={(e) => setAmountIn(e.target.value)}
+              onChange={(e) => { setAmountIn(e.target.value); setLastEdited('in') }}
               className="flex-1 bg-transparent outline-none text-lg"
             />
             <span className="font-medium text-sm shrink-0">
@@ -206,10 +226,10 @@ export default function SwapPage() {
           <label className="text-sm text-[var(--muted-foreground)]">获得（预估）</label>
           <div className="flex items-center gap-2 p-3 bg-[var(--muted)] rounded-lg border border-[var(--card-border)]">
             <input
-              type="text"
+              type="number"
               placeholder="0.0"
               value={amountOut.slice(0, 10)}
-              readOnly
+              onChange={(e) => { setAmountOut(e.target.value); setLastEdited('out') }}
               className="flex-1 bg-transparent outline-none text-lg"
             />
             <span className="font-medium text-sm shrink-0">

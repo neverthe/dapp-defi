@@ -2,6 +2,7 @@ import {
   BigInt,
   BigDecimal,
   Bytes,
+  Address,
   ethereum,
   log,
   dataSource,
@@ -9,6 +10,7 @@ import {
 import {
   PairCreated,
 } from "../generated/DefiFactory/DefiFactory"
+import { ERC20 } from "../generated/DefiFactory/ERC20"
 import {
   Swap,
   Mint,
@@ -71,11 +73,16 @@ function getOrCreateToken(address: Bytes): Token {
   let token = Token.load(id)
   if (token == null) {
     token = new Token(id)
-    token.symbol = ""
-    token.name = ""
-    token.decimals = 18
-    token.save()
   }
+  // 始终从链上读取 ERC20 元数据（避免首次创建时为空）
+  let erc20 = ERC20.bind(Address.fromBytes(address))
+  let nameResult = erc20.try_name()
+  let symbolResult = erc20.try_symbol()
+  let decimalsResult = erc20.try_decimals()
+  token.name = nameResult.reverted ? token.name || "" : nameResult.value
+  token.symbol = symbolResult.reverted ? token.symbol || "" : symbolResult.value
+  token.decimals = decimalsResult.reverted ? token.decimals : decimalsResult.value as i32
+  token.save()
   return token
 }
 
@@ -140,6 +147,7 @@ export function handleMint(event: Mint): void {
   action.pair = pair.id
   action.type = "Mint"
   action.sender = event.params.sender
+  action.user = getOrCreateUser(event.params.sender).id
   action.amount0 = amount0
   action.amount1 = amount1
   action.liquidity = ZERO_BD // 从事件中无法直接获取
@@ -166,6 +174,7 @@ export function handleBurn(event: Burn): void {
   action.pair = pair.id
   action.type = "Burn"
   action.sender = event.params.sender
+  action.user = getOrCreateUser(event.params.sender).id
   action.amount0 = amount0
   action.amount1 = amount1
   action.liquidity = ZERO_BD

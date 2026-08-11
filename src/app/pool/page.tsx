@@ -118,6 +118,7 @@ export default function PoolPage() {
   // 拆开 useWriteContract，每个操作独立 isPending，避免互相影响
   const { writeContract: approveA, isPending: isApprovingA } = useWriteContract()
   const { writeContract: approveB, isPending: isApprovingB } = useWriteContract()
+  const { writeContract: approveLp, isPending: isApprovingLp } = useWriteContract()
   const { writeContract: addLiquidity, isPending: isAdding, isSuccess: isAddSuccess } = useWriteContract()
   const { writeContract: removeLiquidity, isPending: isRemoving, isSuccess: isRemoveSuccess } = useWriteContract()
 
@@ -185,6 +186,18 @@ export default function PoolPage() {
     approveB({
       address: TOKEN_B_ADDRESS as `0x${string}`,
       abi: ERC20Abi.abi,
+      functionName: 'approve',
+      args: [ROUTER_ADDRESS as `0x${string}`, maxUint256],
+      chainId: sepolia.id,
+    })
+  }
+
+  // 授权 LP Token（移除流动性前必须授权）
+  const handleApproveLp = () => {
+    if (isApprovingLp || !pairAddress) return
+    approveLp({
+      address: pairAddress as `0x${string}`,
+      abi: DefiPairAbi.abi,
       functionName: 'approve',
       args: [ROUTER_ADDRESS as `0x${string}`, maxUint256],
       chainId: sepolia.id,
@@ -382,6 +395,17 @@ export default function PoolPage() {
               </div>
             )}
 
+            {/* 授权 LP Token */}
+            <button
+              onClick={handleApproveLp}
+              disabled={isApprovingLp}
+              className={`w-full py-2.5 text-sm border border-[var(--card-border)] rounded-lg transition-colors ${
+                isApprovingLp ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[var(--muted)]'
+              }`}
+            >
+              {isApprovingLp ? '授权中...' : '授权 LP Token'}
+            </button>
+
             <button
               onClick={handleRemoveLiquidity}
               disabled={!removeLp || !pairExists || isRemoving}
@@ -393,6 +417,9 @@ export default function PoolPage() {
             >
               {isRemoving ? '交易中...' : '移除流动性'}
             </button>
+            <p className="text-xs text-[var(--muted-foreground)] text-center">
+              首次移除需先授权 Router 操作 LP Token
+            </p>
           </div>
         )}
       </div>

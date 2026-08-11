@@ -10,9 +10,9 @@ dataSources:
     name: DefiFactory
     network: sepolia
     source:
-      address: "0x"  # 替换为部署后的 Factory 地址
+      address: "0x0e43e1e2752ef5993642d2095f807953654285fc"
       abi: DefiFactory
-      startBlock: 0   # 替换为部署区块号
+      startBlock: 11463536
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -25,6 +25,8 @@ dataSources:
           file: ./abis/DefiFactory.json
         - name: DefiPair
           file: ./abis/DefiPair.json
+        - name: ERC20
+          file: ./abis/ERC20.json
       eventHandlers:
         - event: PairCreated(indexed address,indexed address,address,uint256)
           handler: handlePairCreated

@@ -63,6 +63,7 @@ type LiquidityAction @entity(immutable: true) {
   pair: Pair!
   type: LiquidityType!             # Mint(添加) 或 Burn(移除)
   sender: Bytes!
+  user: UserStats!                 # 关联用户（用于 @derivedFrom）
   amount0: BigDecimal!
   amount1: BigDecimal!
   liquidity: BigDecimal!           # LP Token 变化量
