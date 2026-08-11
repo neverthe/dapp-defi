@@ -33,30 +33,30 @@ export default function PoolPage() {
 
   const pairExists = !!pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000'
 
-  const { data: reserves } = useReadContract({
+  const { data: reserves, refetch: refetchReserves } = useReadContract({
     address: pairAddress as `0x${string}` | undefined,
     abi: DefiPairAbi.abi,
     functionName: 'getReserves',
     chainId: sepolia.id,
-    query: { enabled: pairExists },
+    query: { enabled: pairExists, refetchInterval: 8000 },
   })
 
-  const { data: totalSupply } = useReadContract({
+  const { data: totalSupply, refetch: refetchTotalSupply } = useReadContract({
     address: pairAddress as `0x${string}` | undefined,
     abi: DefiPairAbi.abi,
     functionName: 'totalSupply',
     chainId: sepolia.id,
-    query: { enabled: pairExists },
+    query: { enabled: pairExists, refetchInterval: 8000 },
   })
 
   // 读取 LP 余额
-  const { data: lpBalance } = useReadContract({
+  const { data: lpBalance, refetch: refetchLpBalance } = useReadContract({
     address: pairAddress as `0x${string}` | undefined,
     abi: DefiPairAbi.abi,
     functionName: 'balanceOf',
     args: [address as `0x${string}`],
     chainId: sepolia.id,
-    query: { enabled: !!address && pairExists },
+    query: { enabled: !!address && pairExists, refetchInterval: 8000 },
   })
 
   const reservesData = reserves as [bigint, bigint, number] | undefined
@@ -115,13 +115,26 @@ export default function PoolPage() {
     }
   }, [removeLp, reserve0, reserve1, totalSupplyData])
 
-  // 直接发交易，不用 useSimulateContract（避免 RPC 轮询导致 OOM）
-  const { writeContract: approve } = useWriteContract()
-  const { writeContract, isPending } = useWriteContract()
+  // 拆开 useWriteContract，每个操作独立 isPending，避免互相影响
+  const { writeContract: approveA, isPending: isApprovingA } = useWriteContract()
+  const { writeContract: approveB, isPending: isApprovingB } = useWriteContract()
+  const { writeContract: addLiquidity, isPending: isAdding, isSuccess: isAddSuccess } = useWriteContract()
+  const { writeContract: removeLiquidity, isPending: isRemoving, isSuccess: isRemoveSuccess } = useWriteContract()
+
+  // 交易成功后延迟刷新数据（等链上确认）
+  useEffect(() => {
+    if (!isAddSuccess && !isRemoveSuccess) return
+    const timer = setTimeout(() => {
+      refetchReserves()
+      refetchTotalSupply()
+      refetchLpBalance()
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [isAddSuccess, isRemoveSuccess, refetchReserves, refetchTotalSupply, refetchLpBalance])
 
   const handleAddLiquidity = () => {
-    if (!amountA || !amountB || !address) return
-    writeContract({
+    if (!amountA || !amountB || !address || isAdding) return
+    addLiquidity({
       address: ROUTER_ADDRESS as `0x${string}`,
       abi: RouterAbi.abi,
       functionName: 'addLiquidity',
@@ -139,8 +152,8 @@ export default function PoolPage() {
   }
 
   const handleRemoveLiquidity = () => {
-    if (!removeLp || !address) return
-    writeContract({
+    if (!removeLp || !address || isRemoving) return
+    removeLiquidity({
       address: ROUTER_ADDRESS as `0x${string}`,
       abi: RouterAbi.abi,
       functionName: 'removeLiquidity',
@@ -157,7 +170,8 @@ export default function PoolPage() {
   }
 
   const handleApproveA = () => {
-    approve({
+    if (isApprovingA) return
+    approveA({
       address: TOKEN_A_ADDRESS as `0x${string}`,
       abi: ERC20Abi.abi,
       functionName: 'approve',
@@ -167,7 +181,8 @@ export default function PoolPage() {
   }
 
   const handleApproveB = () => {
-    approve({
+    if (isApprovingB) return
+    approveB({
       address: TOKEN_B_ADDRESS as `0x${string}`,
       abi: ERC20Abi.abi,
       functionName: 'approve',
@@ -280,28 +295,34 @@ export default function PoolPage() {
             <div className="flex gap-2">
               <button
                 onClick={handleApproveA}
-                className="flex-1 py-2.5 text-sm border border-[var(--card-border)] rounded-lg hover:bg-[var(--muted)] transition-colors"
+                disabled={isApprovingA}
+                className={`flex-1 py-2.5 text-sm border border-[var(--card-border)] rounded-lg transition-colors ${
+                  isApprovingA ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[var(--muted)]'
+                }`}
               >
-                授权 TKA
+                {isApprovingA ? '授权中...' : '授权 TKA'}
               </button>
               <button
                 onClick={handleApproveB}
-                className="flex-1 py-2.5 text-sm border border-[var(--card-border)] rounded-lg hover:bg-[var(--muted)] transition-colors"
+                disabled={isApprovingB}
+                className={`flex-1 py-2.5 text-sm border border-[var(--card-border)] rounded-lg transition-colors ${
+                  isApprovingB ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[var(--muted)]'
+                }`}
               >
-                授权 TKB
+                {isApprovingB ? '授权中...' : '授权 TKB'}
               </button>
             </div>
 
             <button
               onClick={handleAddLiquidity}
-              disabled={!amountA || !amountB || isPending}
+              disabled={!amountA || !amountB || isAdding}
               className={`w-full py-3 rounded-lg font-medium transition-colors ${
-                !amountA || !amountB || isPending
+                !amountA || !amountB || isAdding
                   ? 'bg-gray-400 text-white cursor-not-allowed'
                   : 'bg-indigo-600 text-white hover:bg-indigo-700'
               }`}
             >
-              {isPending ? '交易中...' : '添加流动性'}
+              {isAdding ? '交易中...' : '添加流动性'}
             </button>
           </div>
         ) : (
@@ -363,14 +384,14 @@ export default function PoolPage() {
 
             <button
               onClick={handleRemoveLiquidity}
-              disabled={!removeLp || !pairExists || isPending}
+              disabled={!removeLp || !pairExists || isRemoving}
               className={`w-full py-3 rounded-lg font-medium transition-colors ${
-                !removeLp || !pairExists || isPending
+                !removeLp || !pairExists || isRemoving
                   ? 'bg-gray-400 text-white cursor-not-allowed'
                   : 'bg-red-600 text-white hover:bg-red-700'
               }`}
             >
-              {isPending ? '交易中...' : '移除流动性'}
+              {isRemoving ? '交易中...' : '移除流动性'}
             </button>
           </div>
         )}

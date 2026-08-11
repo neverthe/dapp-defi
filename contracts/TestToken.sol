@@ -9,11 +9,12 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  * 部署时铸造 1,000,000 个代币给部署者，支持后续 mint
  */
 contract TestToken is ERC20 {
+    // 父类构造函数调用。它把 name 和 symbol 传给父合约去存储
     constructor(string memory name, string memory symbol) ERC20(name, symbol) {
         _mint(msg.sender, 1_000_000 * 10 ** decimals());
     }
 
-    /// @notice 铸造新代币（仅用于测试）
+    /// @notice 铸造新代币（仅用于测试）external：任何人都可以调用
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
     }

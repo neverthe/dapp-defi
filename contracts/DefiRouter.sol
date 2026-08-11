@@ -229,18 +229,24 @@ contract DefiRouter {
             amountB = amountBDesired;
         } else {
             (uint256 reserveA, uint256 reserveB) = _getReserves(tokenA, tokenB);
-            // 按当前比例计算最优添加量
-            uint256 amountBOptimal = _quote(amountADesired, reserveA, reserveB);
-            if (amountBOptimal <= amountBDesired) {
-                require(amountBOptimal >= amountBMin, "DefiRouter: INSUFFICIENT_B_AMOUNT");
+            if (reserveA == 0 && reserveB == 0) {
+                // 池已创建但无流动性（首次添加）
                 amountA = amountADesired;
-                amountB = amountBOptimal;
-            } else {
-                uint256 amountAOptimal = _quote(amountBDesired, reserveB, reserveA);
-                require(amountAOptimal <= amountADesired, "DefiRouter: EXCESSIVE_A_AMOUNT");
-                require(amountAOptimal >= amountAMin, "DefiRouter: INSUFFICIENT_A_AMOUNT");
-                amountA = amountAOptimal;
                 amountB = amountBDesired;
+            } else {
+                // 按当前比例计算最优添加量
+                uint256 amountBOptimal = _quote(amountADesired, reserveA, reserveB);
+                if (amountBOptimal <= amountBDesired) {
+                    require(amountBOptimal >= amountBMin, "DefiRouter: INSUFFICIENT_B_AMOUNT");
+                    amountA = amountADesired;
+                    amountB = amountBOptimal;
+                } else {
+                    uint256 amountAOptimal = _quote(amountBDesired, reserveB, reserveA);
+                    require(amountAOptimal <= amountADesired, "DefiRouter: EXCESSIVE_A_AMOUNT");
+                    require(amountAOptimal >= amountAMin, "DefiRouter: INSUFFICIENT_A_AMOUNT");
+                    amountA = amountAOptimal;
+                    amountB = amountBDesired;
+                }
             }
         }
 

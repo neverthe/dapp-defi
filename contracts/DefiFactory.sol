@@ -15,9 +15,12 @@ import "./DefiPair.sol";
  */
 contract DefiFactory {
     // ── 事件 ──
+    // ndexed 加在 token0 和 token1 上，方便前端（或 The Graph 子图）通过这两个代币地址快速过滤出相关池子。
+  // address pair新创建的交易对合约地址   uint256交易对数量（第几个池子）
+  //getPair[tokenA][tokenB] 和 getPair[tokenB][tokenA] 都有效，因为 createPair 里会 按地址排序 （小的放 token0
     event PairCreated(address indexed token0, address indexed token1, address pair, uint256);
 
-    // ── 状态变量 ──
+    // ── 状态变量 ──getPair[tokenA][tokenB] → 返回这个交易对的合约地址。
     mapping(address => mapping(address => address)) public getPair; // tokenA => tokenB => pair
     address[] public allPairs;                                      // 所有交易对列表
 

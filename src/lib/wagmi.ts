@@ -8,7 +8,6 @@ export const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS || '0x'
 export const TOKEN_A_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_A || '0x'
 export const TOKEN_B_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_B || '0x'
 
-// Sepolia RPC 列表（Infura 优先，公共 RPC 做备选）
 const sepoliaRpcUrls = [
   process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL,
   'https://ethereum-sepolia.publicnode.com',
@@ -23,7 +22,7 @@ export const config = createConfig({
     metaMask({
       dappMetadata: {
         name: 'DeFi Swap DApp',
-        url: 'http://localhost:3000',
+        url: 'http://localhost:3003',
       },
     }),
     walletConnect({ projectId: 'e618174c67748f7b65e9d54b89ed2741' }),
@@ -31,9 +30,9 @@ export const config = createConfig({
   transports: {
     [hardhat.id]: http('http://127.0.0.1:8545'),
     [sepolia.id]: fallback(sepoliaRpcUrls.map(url => http(url, {
-      timeout: 60_000,
-      retryCount: 2,
-      retryDelay: 1000,
+      timeout: 10_000,       // 10 秒超时就换下一个 RPC
+      retryCount: 0,          // 当前 RPC 不重试，直接 fallback
+      retryDelay: 500,
     }))),
   },
   batch: {
