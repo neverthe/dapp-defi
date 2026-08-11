@@ -7,6 +7,7 @@ export const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS || '0x'
 export const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS || '0x'
 export const TOKEN_A_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_A || '0x'
 export const TOKEN_B_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_B || '0x'
+export const TOKEN_C_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_C || '0x'
 
 const sepoliaRpcUrls = [
   process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL,

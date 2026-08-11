@@ -9,6 +9,7 @@ import DefiPairAbi from '@/abis/DefiPair.json'
 import ERC20Abi from '@/abis/TestToken.json'
 import { ROUTER_ADDRESS, TOKEN_A_ADDRESS, TOKEN_B_ADDRESS, FACTORY_ADDRESS } from '@/lib/wagmi'
 import { getLiquidityAmount, getRemoveAmounts, getPoolShare, formatAmount } from '@/lib/utils'
+import { fetchUserStats } from '@/lib/subgraph'
 
 export default function PoolPage() {
   const { address, isConnected } = useAccount()
@@ -70,6 +71,20 @@ export default function PoolPage() {
   const poolShare = userLpBalance && totalSupplyData
     ? getPoolShare(userLpBalance, totalSupplyData)
     : 0
+
+  // LP 手续费收入（从子图读取）
+  const [feesToken0, setFeesToken0] = useState('0')
+  const [feesToken1, setFeesToken1] = useState('0')
+
+  useEffect(() => {
+    if (!address) return
+    fetchUserStats(address).then(data => {
+      if (data.userStats) {
+        setFeesToken0(data.userStats.totalFeesEarnedToken0 || '0')
+        setFeesToken1(data.userStats.totalFeesEarnedToken1 || '0')
+      }
+    }).catch(() => {})
+  }, [address])
 
   // 计算将获得的 LP Token
   const [estimatedLp, setEstimatedLp] = useState('')
@@ -235,6 +250,14 @@ export default function PoolPage() {
             <div>
               <div className="text-[var(--muted-foreground)]">池子占比</div>
               <div className="font-medium">{poolShare.toFixed(4)}%</div>
+            </div>
+            <div>
+              <div className="text-[var(--muted-foreground)]">手续费收入 TKA</div>
+              <div className="font-medium text-green-600">{Number(feesToken0).toFixed(6)}</div>
+            </div>
+            <div>
+              <div className="text-[var(--muted-foreground)]">手续费收入 TKB</div>
+              <div className="font-medium text-green-600">{Number(feesToken1).toFixed(6)}</div>
             </div>
           </div>
         </div>
