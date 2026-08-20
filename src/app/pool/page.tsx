@@ -34,6 +34,7 @@ export default function PoolPage() {
 
   const pairExists = !!pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000'
 
+  // 定时（每8秒）自动查询交易对的储备量和 LP Token 总供应量，保持 UI 数据与链上同步。
   const { data: reserves, refetch: refetchReserves } = useReadContract({
     address: pairAddress as `0x${string}` | undefined,
     abi: DefiPairAbi.abi,
@@ -50,7 +51,7 @@ export default function PoolPage() {
     query: { enabled: pairExists, refetchInterval: 8000 },
   })
 
-  // 读取 LP 余额
+  // 读取 用户的 LP 余额
   const { data: lpBalance, refetch: refetchLpBalance } = useReadContract({
     address: pairAddress as `0x${string}` | undefined,
     abi: DefiPairAbi.abi,
@@ -60,12 +61,15 @@ export default function PoolPage() {
     query: { enabled: !!address && pairExists, refetchInterval: 8000 },
   })
 
+  // 类型转换：
   const reservesData = reserves as [bigint, bigint, number] | undefined
+  // 所有 LP Token 的总数量
   const totalSupplyData = totalSupply as bigint | undefined
   const userLpBalance = lpBalance as bigint | undefined
 
-  // 提取原始值避免数组引用导致无限重算
-  const reserve0 = reservesData?.[0]
+  // 提取原始值避免数组引用导致无限重算，否则在 useEffect 中可能导致无限循环
+  // const reserve0 = reservesData?.[0]  // 如果这样每次都是新的引用
+  const reserve0 = reservesData?.[0]// 值相同则引用相同
   const reserve1 = reservesData?.[1]
 
   const poolShare = userLpBalance && totalSupplyData
@@ -78,21 +82,24 @@ export default function PoolPage() {
 
   useEffect(() => {
     if (!address) return
+    // 用户连接时查询收益
     fetchUserStats(address).then(data => {
       if (data.userStats) {
         setFeesToken0(data.userStats.totalFeesEarnedToken0 || '0')
         setFeesToken1(data.userStats.totalFeesEarnedToken1 || '0')
       }
     }).catch(() => {})
-  }, [address])
+  }, [address])  // 只在地址变化时执行
 
   // 计算将获得的 LP Token
-  const [estimatedLp, setEstimatedLp] = useState('')
-  const [estimatedShare, setEstimatedShare] = useState(0)
+  const [estimatedLp, setEstimatedLp] = useState('')  // 预估获得的 LP Token
+  const [estimatedShare, setEstimatedShare] = useState(0)// 预估份额百分比
 
   useEffect(() => {
+     // 检查条件：必须有储备量、用户输入了金额、有总供应量
     if (!reserve0 || !reserve1 || !amountA || !amountB || !totalSupplyData) return
     try {
+         // 计算会获得多少 LP Token
       const lp = getLiquidityAmount(
         parseEther(amountA),
         parseEther(amountB),

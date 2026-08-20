@@ -66,6 +66,7 @@ contract DefiPair is ERC20, ReentrancyGuard {
     // ── 内部函数 ──
 
     /// @notice 获取当前储备量
+    // 上一次交易/操作结束时的余额
     function getReserves() public view returns (uint112 _reserve0, uint112 _reserve1, uint32 _blockTimestampLast) {
         _reserve0 = reserve0;
         _reserve1 = reserve1;
@@ -131,13 +132,23 @@ contract DefiPair is ERC20, ReentrancyGuard {
             liquidity = _sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY;
             // 永久锁定最小流动性，防止粉尘攻击
             // OZ 5.x 不允许 _mint 到 address(0)，改用死地址锁定
-            // 永久锁定 1000 个最小单位的 LP Token 到零地址。
+            // 零地址 address(0) 是一个"黑洞"，没有人能控制它。
+// 向零地址铸造代币，本质上就是永久销毁这些代币。
+// OZ 团队认为这种操作容易让开发者混淆"销毁"和"铸造"的语义，
+// 且在实际业务中容易被误用，因此在新版本中强制要求用 _burn 来减少供应量，而不是用 _mint 来假装销毁。
+// 没有本质区别。两者都是无法被控制的地址，0xdEaD 只是社区约定俗成的"可视化为黑洞"，
+// 而 address(0) 是更底层的"空地址"。OZ 5.0 禁止 address(0) 是为了语义清晰，不代表地址本身有安全风险。
+
+
+            // 永久锁定 1000 个最小单位的 LP Token 到零地址。因为这个数值远小于绝大多数池子的总供应量。
             // 防止有人首次添加极少量（如 1 wei + 1 wei），让 _totalSupply 极小，后续攻击者用极低成本操纵价格。
             // 锁仓 1000 相当于设置了一个“最低股份”，让攻击成本增加 1000 倍。
             // 1000 个 LP Token 对应的那部分代币（约 1000 / totalSupply 的比例）永远躺在池子里，相当于所有 LP 共同“供养”了这部分流动性。
             _mint(address(0xdead), MINIMUM_LIQUIDITY);
         } else {
-            // 新增的份额，必须与池子现有的比例一致。
+            // 新增的份额，必须与池子现有的比例一致。确保你获得的份额永远受限于你存入较少的那个币的比例，
+            // "强制用户按现有比例添加，防止大额单边存入稀释池子或操纵价格。任何多存的部分都被视为对池子的捐赠，
+            // 不会增加 LP 份额，从而维护了所有 LP 持有者的利益均衡。"
             // 按比例铸造：min(amount0 * totalSupply / reserve0, amount1 * totalSupply / reserve1)
             liquidity = _min(
                 amount0 * _totalSupply / _reserve0,
@@ -147,8 +158,9 @@ contract DefiPair is ERC20, ReentrancyGuard {
 
         require(liquidity > 0, "DefiPair: INSUFFICIENT_LIQUIDITY_MINTED");
         // 把新铸造的 LP Token 打给用户（to 地址）。
+        // 用户添加流动性时会把 to 设为自己的钱包地址，LP Token 直接进入用户账户。
         _mint(to, liquidity);
-
+// _update更新  传进去实际的余额
         _update(balance0, balance1, _reserve0, _reserve1);
 
         if (feeOn) {
@@ -164,13 +176,15 @@ contract DefiPair is ERC20, ReentrancyGuard {
     /// @return amount1 取回的代币1数量
     function burn(address to) external nonReentrant returns (uint256 amount0, uint256 amount1) {
         (uint112 _reserve0, uint112 _reserve1,) = getReserves();
-       
+    //    做这个缓存节省gas
         address _token0 = token0;
         address _token1 = token1;
         uint256 balance0 = IERC20(_token0).balanceOf(address(this));
         uint256 balance1 = IERC20(_token1).balanceOf(address(this));
         uint256 liquidity = balanceOf(address(this));
-
+// 平台费属于 经济模型扩展，不是核心机制，在初版中关闭可以让代码更清晰、更容易理解。
+// 平台费是基于 累计交易量 计算的，需要等用户取回流动性时一并结算。burn时一次性计算应上缴的协议费。
+// feeOn 永远在「改变 LP 供应量」之前被检测，确保协议费优先被结算，再处理用户的份额。
         bool feeOn = _mintFee(_reserve0, _reserve1);
         uint256 _totalSupply = totalSupply();
 
@@ -179,14 +193,14 @@ contract DefiPair is ERC20, ReentrancyGuard {
         amount1 = liquidity * balance1 / _totalSupply;
 
         require(amount0 > 0 && amount1 > 0, "DefiPair: INSUFFICIENT_LIQUIDITY_BURNED");
-
+            // _burn安全扣减余额，更新总供应量，触发 Transfer 事件
         _burn(address(this), liquidity);
+        // 全地把 ERC20 代币转出去，同时兼容那些不走寻常路的代币
         _safeTransfer(_token0, to, amount0);
         _safeTransfer(_token1, to, amount1);
 
         balance0 = IERC20(_token0).balanceOf(address(this));
-        balance1 = IERC20(_token1).balanceOf(address(this));
-
+        //每笔交易结束后的收盘操作"。无论是添加流动性、移除流动性还是兑换，只要池子的状态发生了改变，最后都必须调用 _update 来"存档"。
         _update(balance0, balance1, _reserve0, _reserve1);
 
         if (feeOn) {
@@ -211,6 +225,7 @@ contract DefiPair is ERC20, ReentrancyGuard {
     ) external nonReentrant {
         require(amount0Out > 0 || amount1Out > 0, "DefiPair: INSUFFICIENT_OUTPUT_AMOUNT");
         (uint112 _reserve0, uint112 _reserve1,) = getReserves();
+    //  防止用户试图提取超过池子实际储备的代币。
         require(amount0Out < _reserve0 && amount1Out < _reserve1, "DefiPair: INSUFFICIENT_LIQUIDITY");
 
         uint256 balance0;
@@ -221,19 +236,23 @@ contract DefiPair is ERC20, ReentrancyGuard {
             address _token1 = token1;
             require(to != _token0 && to != _token1, "DefiPair: INVALID_TO");
 
-            // 先转出代币（乐观转账）
+            // 先转出代币（乐观转账） 支持 swap 函数一次性同时转出两种代币。
             if (amount0Out > 0) _safeTransfer(_token0, to, amount0Out);
             if (amount1Out > 0) _safeTransfer(_token1, to, amount1Out);
 
-            // 回调（支持 flash swap）
+            // 回调（支持 flash swap） 闪电贷回调  data	附加数据（可以是任意内容，如编码后的套利指令）
             if (data.length > 0) {
                 IDefiCallee(to).defiCall(msg.sender, amount0Out, amount1Out, data);
             }
-
+                // 重新读取余额
             balance0 = IERC20(_token0).balanceOf(address(this));
             balance1 = IERC20(_token1).balanceOf(address(this));
         }
-
+        // swap() 函数 不直接知道 用户付了哪种币、付了多少。它用了一种"事后算账"的方式：
+ // 如果 balance0（转出后余额） > _reserve0 - amount0Out（转出后预期余额）说明用户多付了 token0 
+// 最终余额是否比预期转出后的余额多"，多的部分就是用户付的 input。
+//假如用代币A转入100输出97B  初始5000，  balance0 > _reserve0 - amount0Out （5100）>（5000-0）
+// balance0 - (_reserve0 - amount0Out)  （5100）-（5000-0）=100
         uint256 amount0In = balance0 > _reserve0 - amount0Out
             ? balance0 - (_reserve0 - amount0Out)
             : 0;
@@ -246,6 +265,7 @@ contract DefiPair is ERC20, ReentrancyGuard {
         {
             // 验证 k 值：扣除 0.3% 手续费后的新 k 必须 >= 旧 k
             // 手续费留在池中，所以新 k 总是 >= 旧 k
+            // balance0 × 1000 → 放大 1000 倍（避免小数运算）  手续费0.003乘1000就是3
             uint256 balance0Adjusted = balance0 * 1000 - amount0In * 3;
             uint256 balance1Adjusted = balance1 * 1000 - amount1In * 3;
 
@@ -263,6 +283,8 @@ contract DefiPair is ERC20, ReentrancyGuard {
     // ── 辅助函数 ──
 
     /// @notice 安全转账（兼容不返回 bool 的 ERC20）
+    // 用低层 call 手动调用 transfer，同时检查"调用是否成功"和"返回值是否为 true"两个条件，
+    // 兼容 USDT 这类不返回值的代币，防止转账静默失败导致资产丢失
     function _safeTransfer(address token, address to, uint256 value) private {
         (bool success, bytes memory data) = token.call(
             abi.encodeWithSelector(IERC20.transfer.selector, to, value)

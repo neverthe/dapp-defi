@@ -17,6 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    // suppressHydrationWarning当有客户端动态内容（如主题切换）时，服务端和客户端渲染的 HTML 可能不一致，这个属性可以抑制警告。
     <html lang="zh-CN" suppressHydrationWarning>
       <body className="min-h-screen bg-[var(--background)] text-[var(--foreground)] antialiased font-sans">
         <Providers>

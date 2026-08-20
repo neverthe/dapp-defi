@@ -21,6 +21,7 @@ const TOKENS = [
 const DEFAULT_SLIPPAGE = 0.5
 
 // 根据输入输出找最优路径
+// // 没有 TKA-TKC 直连池，自动找到路径：TKA → TKB → TKC 返回: [TOKEN_A_ADDRESS, TOKEN_B_ADDRESS, TOKEN_C_ADDRESS]
 function findRoute(from: string, to: string): string[] {
   if (from === to) return []
   // 直接路径：检查是否有直连池
@@ -34,32 +35,38 @@ function findRoute(from: string, to: string): string[] {
       (b.toLowerCase() === from.toLowerCase() && a.toLowerCase() === to.toLowerCase())
   )
   if (isDirect) return [from, to]
-  // 多跳：通过 TKB 中转
+  // 多跳：通过 TKB 中转  这是简化版本，用于演示多跳概念
   return [from, TOKEN_B_ADDRESS, to]
 }
 
 export default function SwapPage() {
   const { address, isConnected } = useAccount()
 
-  const [tokenIn, setTokenIn] = useState(TOKEN_A_ADDRESS)
-  const [tokenOut, setTokenOut] = useState(TOKEN_B_ADDRESS)
-  const [amountIn, setAmountIn] = useState('')
-  const [amountOut, setAmountOut] = useState('')
-  const [slippage, setSlippage] = useState(DEFAULT_SLIPPAGE)
-  const [lastEdited, setLastEdited] = useState<'in' | 'out'>('in')
-  const [showInDropdown, setShowInDropdown] = useState(false)
-  const [showOutDropdown, setShowOutDropdown] = useState(false)
+  const [tokenIn, setTokenIn] = useState(TOKEN_A_ADDRESS)// 支付代币的名字
+  const [tokenOut, setTokenOut] = useState(TOKEN_B_ADDRESS)// 获得代币的名字
+  const [amountIn, setAmountIn] = useState('') // 支付金额
+  const [amountOut, setAmountOut] = useState('') // 获得金额
+  const [slippage, setSlippage] = useState(DEFAULT_SLIPPAGE)  // 滑点 0.5%
+  const [lastEdited, setLastEdited] = useState<'in' | 'out'>('in') // 最后编辑的字段
+  const [showInDropdown, setShowInDropdown] = useState(false) // 显示输入下拉（选择输入哪个代币的下拉框）
+  const [showOutDropdown, setShowOutDropdown] = useState(false) //显示输出下拉
 
   // 路由路径
+  // 使用 useMemo：只在 tokenIn/tokenOut 变化时重新计算
+  // 这是"路径规划器"——决定兑换要走哪条路
   const route = useMemo(() => findRoute(tokenIn, tokenOut), [tokenIn, tokenOut])
-  const isMultiHop = route.length > 2
+  const isMultiHop = route.length > 2 // 显示"多跳"标签
   // 直连交易对地址（用于检查 pair 存在性和储备量）
   const directPairTokenA = route[0]
+  // 因为路由是一个连续的路径。第一步：A → B（使用 A-B 池子）第二步：B → C（使用 B-C 池子）
+  // 每个池子都是由路径中相邻的两个元素组成的，第一个池子必然是 [path[0], path[1]]。
   const directPairTokenB = route.length === 2 ? route[1] : route[1]
 
   // 读取直连 pair（第一个跳跃的 pair）
   const { data: pairAddress } = useReadContract({
     address: FACTORY_ADDRESS as `0x${string}`,
+    // 完整 ABI：从 .sol 编译生成，包含所有函数（推荐）
+    // 精简 ABI：只包含需要的函数，代码更小（节省体积）
     abi: [{ inputs: [{ name: 'a', type: 'address' }, { name: 'b', type: 'address' }], name: 'getPair', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' }],
     functionName: 'getPair',
     args: [directPairTokenA as `0x${string}`, directPairTokenB as `0x${string}`],
@@ -69,6 +76,7 @@ export default function SwapPage() {
   const pairExists = !!pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000'
 
   // 从 Router 查询多跳输出
+  //用户最后编辑的是"支付"字段 amountIn 用户输入了金额  pairExists交易对存在
   const hasInput = lastEdited === 'in' && amountIn && pairExists
   const { data: amountsOutData } = useReadContract({
     address: ROUTER_ADDRESS as `0x${string}`,
@@ -97,6 +105,8 @@ export default function SwapPage() {
   // 解析多跳计算结果
   useEffect(() => {
     if (lastEdited === 'in' && amountsOutData) {
+      // amountsOutData = [1000000000000000000n, 50000000000000000n]
+      // 用户输入，
       const amounts = amountsOutData as bigint[]
       const finalOut = amounts[amounts.length - 1]
       setAmountOut(formatEther(finalOut))
@@ -106,28 +116,36 @@ export default function SwapPage() {
     } else if (!amountIn && !amountOut) {
       setAmountOut('')
     }
+    // 查询结果返回，用户切换编辑字段，用户输入金额
   }, [amountsOutData, amountsInData, lastEdited, amountIn, amountOut])
 
   // 计算价格影响、滑点等
   const displayAmountOut = (() => {
+     // 情况1：用户编辑"支付"字段，且有查询结果
     if (lastEdited === 'in' && amountsOutData) {
       const amounts = amountsOutData as bigint[]
       return amounts[amounts.length - 1]
     }
+     // 情况2：用户直接输入了"获得"金额
     if (amountOut) return parseEther(amountOut || '0')
+       // 情况3：什么都没有
     return 0n
   })()
   const displayAmountIn = (() => {
+     // 情况1：用户编辑"获得"字段，通过查询计算所需输入
     if (lastEdited === 'out' && amountsInData) {
       const amounts = amountsInData as bigint[]
       return amounts[0]
     }
+      // 情况2：用户直接输入了"支付"金额
     if (amountIn) return parseEther(amountIn || '0')
     return 0n
   })()
-
+// 用户预期得到 100 TKB，设置滑点 0.5%(displayAmountOut, slippage)// 最小99.5 TKB
+// minOut 是用户资金的"安全网"，确保即使价格波动，用户也不会遭受超出预期的损失
   const minOut = displayAmountOut > 0n ? getMinAmountOut(displayAmountOut, slippage) : 0n
 
+  // 调用 Pair 合约的 getReserves 函数，获取池子中两种代币的储备量，并判断池子是否有流动性。
   const { data: reserves } = useReadContract({
     address: pairAddress as `0x${string}` | undefined,
     abi: DefiPairAbi.abi,
@@ -135,15 +153,21 @@ export default function SwapPage() {
     chainId: sepolia.id,
     query: { enabled: pairExists },
   })
-
+// 类型断言。getReserves 返回一个三元组 (reserve0, reserve1, blockTimestampLast)，分别是大整数、大整数、数字。
   const reservesData = reserves as [bigint, bigint, number] | undefined
+  // 检查池子是否有流动性。如果储备量为 0，说明没有人添加流动性，交易会失败。
   const hasLiquidity = !!reservesData?.[0] && reservesData[0] > 0n
 
   // 价格影响
   const priceImpact = (() => {
+    //   // 1. 检查条件：必须有储备量数据，且输入金额大于0
     if (!reservesData || displayAmountIn === 0n) return 0
+    // // 2. 判断输入代币是 token0 还是 token1
     const isToken0 = directPairTokenA.toLowerCase() === TOKEN_A_ADDRESS.toLowerCase()
+    // 3. 获取对应的储备量
     const reserveIn = isToken0 ? reservesData[0] : reservesData[1]
+      // 4. 计算价格影响：输入金额 / (储备量 + 输入金额) × 100%
+      // 无法控制，由交易大小决定
     return Number(displayAmountIn) / (Number(reserveIn) + Number(displayAmountIn)) * 100
   })()
 
@@ -160,6 +184,7 @@ export default function SwapPage() {
   const { writeContract, isPending } = useWriteContract()
 
   const handleSwap = () => {
+      // 1. 安全检查：必须有输入金额、滑点保护值、钱包地址
     if (!amountIn || !minOut || !address) return
     writeContract({
       address: ROUTER_ADDRESS as `0x${string}`,
@@ -168,9 +193,9 @@ export default function SwapPage() {
       args: [
         parseEther(amountIn),
         minOut,
-        route as `0x${string}`[],
+        route as `0x${string}`[],// 例如：['0xTKA', '0xTKB', '0xTKC']
         address as `0x${string}`,
-        BigInt(Math.floor(Date.now() / 1000) + 1200),
+        BigInt(Math.floor(Date.now() / 1000) + 1200),// 如果交易在 20 分钟内没有被确认，自动过期
       ],
       chainId: sepolia.id,
     })
@@ -194,7 +219,7 @@ export default function SwapPage() {
     chainId: sepolia.id,
     query: { enabled: !!address },
   })
-
+// 用户输入了金额，且查询到了授权额度，授权额度 < 需要转账的金额的情况下必须需要授权
   const needsApproval = !!amountIn && !!allowance && (allowance as bigint) < parseEther(amountIn || '0')
 
   const { writeContract: approve, isPending: isApproving } = useWriteContract()
@@ -204,13 +229,14 @@ export default function SwapPage() {
       address: tokenIn as `0x${string}`,
       abi: ERC20Abi.abi,
       functionName: 'approve',
-      args: [ROUTER_ADDRESS as `0x${string}`, maxUint256],
+      args: [ROUTER_ADDRESS as `0x${string}`, maxUint256],  // 	只需授权一次maxUint256授权多少（无限额度）
       chainId: sepolia.id,
     })
   }
-
+// 获取输入和输出代币符号。 TOKENS.find() - 在代币列表中查找， 匹配代币地址
   const tokenInSymbol = TOKENS.find(t => t.address === tokenIn)?.symbol || '???'
   const tokenOutSymbol = TOKENS.find(t => t.address === tokenOut)?.symbol || '???'
+  // 遍历路由数组的每个地址，匹配对应符号，提升了用户体验UI好
   const routeStr = route.map(a => TOKENS.find(t => t.address.toLowerCase() === a.toLowerCase())?.symbol || a.slice(0,6)).join(' → ')
 
   if (!isConnected) {

@@ -18,10 +18,12 @@ export function ConnectButton() {
   // 点击外部关闭弹窗
   useEffect(() => {
     const handler = (e: MouseEvent) => {
+      //  // 如果点击的不是弹窗内部，关闭弹窗
       if (modalRef.current && !modalRef.current.contains(e.target as Node)) {
         setShowModal(false)
       }
     }
+      // 如果弹窗显示，监听点击事件
     if (showModal) document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [showModal])

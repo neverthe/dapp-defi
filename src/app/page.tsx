@@ -3,7 +3,7 @@
 import { useAccount } from 'wagmi'
 import { useEffect, useState } from 'react'
 import { fetchPairs } from '@/lib/subgraph'
-import Link from 'next/link'
+import Link from 'next/link'// Next.js 路由跳转
 
 export default function Home() {
   const { isConnected } = useAccount()
@@ -11,10 +11,12 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // useEffect 确保在 DOM 渲染完成后获取数据。
     fetchPairs()
       .then((data) => setPairs(data.pairs || []))
       .catch(() => {})
       .finally(() => setLoading(false))
+       // 组件挂载后自动获取数据 空依赖数组 = 只在页面加载时执行一次
   }, [])
 
   return (

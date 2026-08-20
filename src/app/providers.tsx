@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react'
 import { config } from '@/lib/wagmi'
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  // 只在组件挂载时创建一次
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -15,6 +16,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       },
     },
   }))
+  // . 防止水合错误:服务端和客户端渲染结果不一致,解决方案： 只在客户端渲染 Web3 组件
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => { setMounted(true) }, [])

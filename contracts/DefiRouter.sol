@@ -17,12 +17,15 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * - 多池路由：A→B→C（面试加分项：Uniswap multihop swap 原理）
  * 
  * 面试要点：
- * - minAmountOut 防止 MEV 抢跑和三明治攻击
+ * - minAmountOut 防止 MEV 抢跑和三明治攻击，
+ 能够控制交易风险 ，用户指定最小输出金额，实际输出必须 >= 用户指定的最小值
+ 
  * - 多池路由：当 A/C 没有直接交易对时，通过 A/B 和 B/C 两个池子跳转
  */
 contract DefiRouter {
     DefiFactory public immutable factory;
 
+//  构造函数，部署时执行一次  将传入的工厂合约地址赋值给 factory
     constructor(address _factory) {
         factory = DefiFactory(_factory);
     }
@@ -37,7 +40,7 @@ contract DefiRouter {
     receive() external payable {}
 
     // ── 内部函数 ──
-
+    // pure: 不读取也不修改状态变量   internal: 仅合约内部和继承合约可调用
     /// @notice 根据输入和储备量计算输出（已扣除 0.3% 手续费）
     /// 公式：amountOut = amountIn * 997 * reserveOut / (reserveIn * 1000 + amountIn * 997)
     function _getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
@@ -49,6 +52,7 @@ contract DefiRouter {
         uint256 amountInWithFee = amountIn * 997;
         uint256 numerator = amountInWithFee * reserveOut;
         uint256 denominator = reserveIn * 1000 + amountInWithFee;
+        // 这是 Uniswap V2 的恒定乘积公式变体
         amountOut = numerator / denominator;
     }
 
@@ -63,17 +67,19 @@ contract DefiRouter {
 
         uint256 numerator = reserveIn * amountOut * 1000;
         uint256 denominator = (reserveOut - amountOut) * 997;
+        // +1: 处理整除舍入误差，确保输入足够
         amountIn = numerator / denominator + 1;
     }
 
     /// @notice 多池路由：计算路径上每一步的输出
+    // path: 代币地址数组，如 [USDC, WETH, DAI]
     function _getAmountsOut(uint256 amountIn, address[] memory path)
         internal view returns (uint256[] memory amounts)
     {
         require(path.length >= 2, "DefiRouter: INVALID_PATH");
         amounts = new uint256[](path.length);
         amounts[0] = amountIn;
-
+        // 实现 多跳路由：A→B→C 通过两个池子
         for (uint256 i = 0; i < path.length - 1; i++) {
             (uint256 reserveIn, uint256 reserveOut) = _getReserves(path[i], path[i + 1]);
             amounts[i + 1] = _getAmountOut(amounts[i], reserveIn, reserveOut);
@@ -94,6 +100,7 @@ contract DefiRouter {
             : (reserve1, reserve0);
     }
 
+// 按地址大小排序，确保交易对唯一标识
     function _sortTokens(address tokenA, address tokenB)
         internal pure returns (address token0, address token1)
     {
